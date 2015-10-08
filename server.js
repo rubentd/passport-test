@@ -152,4 +152,20 @@ var server = app.listen(3000, function () {
 
 
 /* Socket.io server */
-var io = new Server();
+var io = new Server(server);
+
+io.on('connection', function(socket){
+  console.log('socket connection received');
+  socket.emit('handshake', { msg: 'Connection successful' });
+
+  socket.on('hello', function(data){
+    console.log('hello received');
+    socket.emit('hello', { msg: 'hello there!' });
+  });
+
+  socket.on('wink', function(data){
+    console.log('wink received');
+    socket.emit('wink', { msg: 'wink wink' });
+  });
+
+});
