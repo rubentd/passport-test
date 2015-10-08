@@ -7,8 +7,16 @@ import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 import expressSession from 'express-session';
 import Server from 'socket.io';
+import fileStore from 'session-file-store';
+import passportSocketIo from 'passport.socketio'
 import config from './config';
 
+/* File Store */
+var MongoStore = require('connect-mongo')(expressSession);
+var mongoOptions = {
+  url: 'mongodb://admin:admin@localhost/express-session',
+}
+var mStore =  new MongoStore(mongoOptions);
 
 /* Express server */
 var app = express();
@@ -19,11 +27,18 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({
   extended: false
 }));
+
 app.use(cookieParser());
 app.use(expressSession({
+    key: 'express-session-cookie',
     secret: 'keyboard cat',
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    store: mStore,
+    cookie: {
+      httpOnly: false,
+      secure: false
+    }
 }));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -126,7 +141,7 @@ app.get( '/auth/google/failure', function(req, res) {
 
 app.get('/logout', (req, res) => {
   req.logout();
-  res.redirect('/login');
+  res.redirect('/');
 });
 
 app.post('/login', passport.authenticate('local'), (req, res) => {
@@ -154,9 +169,34 @@ var server = app.listen(3000, function () {
 /* Socket.io server */
 var io = new Server(server);
 
+io.use(passportSocketIo.authorize({
+  cookieParser: cookieParser,       // the same middleware you registrer in express
+  key:          'express-session-cookie',       // the name of the cookie where express/connect stores its session_id
+  secret:       'keyboard cat',    // the session_secret to parse the cookie
+  store:        mStore,        // we NEED to use a sessionstore
+  success:      onAuthorizeSuccess,  // *optional* callback on success - read more below
+  fail:         onAuthorizeFail,     // *optional* callback on fail/error - read more below
+}));
+
+function onAuthorizeSuccess(data, accept){
+  console.log('socket authenticated');
+  accept(null, true);
+}
+
+function onAuthorizeFail(data, message, error, accept){
+  if(error){
+    throw new Error(message);
+  }
+  console.log('socket not authenticated', message);
+  accept(null, false);
+}
+
 io.on('connection', function(socket){
   console.log('socket connection received');
   socket.emit('handshake', { msg: 'Connection successful' });
+  console.log('User:', socket.request.user);
+  console.log(socket.handshake.query);
+  const user = socket.request.user;
 
   socket.on('hello', function(data){
     console.log('hello received');
@@ -165,7 +205,11 @@ io.on('connection', function(socket){
 
   socket.on('wink', function(data){
     console.log('wink received');
-    socket.emit('wink', { msg: 'wink wink' });
+    if(user.logged_in){
+      socket.emit('wink', { msg: 'wink wink' });
+    }else{
+      socket.emit('wink', { msg: 'wink denied' });
+    }
   });
 
 });
